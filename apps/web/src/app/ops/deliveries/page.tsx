@@ -70,6 +70,7 @@ export default async function DeliveriesPage({
                 name: { contains: query, mode: "insensitive" },
               },
             },
+            { externalReference: { contains: query, mode: "insensitive" } },
           ],
         }
       : {}),
@@ -160,7 +161,11 @@ export default async function DeliveriesPage({
                 <tr key={delivery.id}>
                   <td>
                     <Link href={`/ops/deliveries/${delivery.id}`}>
-                      <strong>#{delivery.reference}</strong>
+                      <strong>
+                        {delivery.externalReference
+                          ? `${delivery.externalReference} · #${delivery.reference}`
+                          : `#${delivery.reference}`}
+                      </strong>
                       <span className="td-sub">{delivery.customer.name}</span>
                     </Link>
                   </td>
@@ -169,7 +174,10 @@ export default async function DeliveriesPage({
                       {delivery.stops[0]?.addressLine1 ?? "Pickup"}
                     </strong>
                     <span className="td-sub">
-                      to {delivery.stops[1]?.addressLine1 ?? "Drop-off"}
+                      to {delivery.stops.at(-1)?.addressLine1 ?? "Drop-off"}
+                      {delivery.stops.length > 2
+                        ? ` · ${delivery.stops.length} stops`
+                        : ""}
                     </span>
                     <div className="progress">
                       <i style={{ width: `${progress[delivery.status]}%` }} />

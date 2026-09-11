@@ -69,9 +69,29 @@ export function SignInForm() {
       </button>
       <div className="demo-hint">
         <strong>Demo workspace</strong>
-        <br />
-        Run the seed command first. Credentials are populated from your local
-        environment and must be changed for deployment.
+        <div className="demo-accounts">
+          {(
+            [
+              ["Admin", "admin@deliveryos.local"],
+              ["Dispatcher", "dispatcher@deliveryos.local"],
+              ["Driver", "driver@deliveryos.local"],
+            ] as const
+          ).map(([label, account]) => (
+            <button
+              type="button"
+              className="demo-account"
+              key={account}
+              onClick={() => {
+                setEmail(account);
+                setPassword("ChangeMe123!");
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        Use a seeded account, then log out from the sidebar or driver app to
+        switch roles.
       </div>
     </form>
   );

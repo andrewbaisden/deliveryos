@@ -7,7 +7,10 @@ import {
   deliveryStatuses,
   evaluateDeviation,
   evaluateGeofence,
+  headingDegrees,
   InvalidDeliveryTransitionError,
+  inferDriverRouteLocation,
+  interpolateCoordinate,
   transitionDelivery,
 } from ".";
 
@@ -294,5 +297,34 @@ describe("operational classifiers", () => {
         new Date("2026-09-10T12:59:00Z"),
       ),
     ).toBe("AT_RISK");
+  });
+
+  it("interpolates coordinates and computes compass headings", () => {
+    const pickup = { latitude: 51.5416, longitude: -0.0015 };
+    const dropoff = { latitude: 51.5118, longitude: -0.124 };
+    const mid = interpolateCoordinate(pickup, dropoff, 0.5);
+    expect(mid.latitude).toBeCloseTo(51.5267, 4);
+    expect(mid.longitude).toBeCloseTo(-0.06275, 4);
+    expect(headingDegrees(pickup, dropoff)).toBeGreaterThan(220);
+    expect(headingDegrees(pickup, dropoff)).toBeLessThan(280);
+    const outbound = inferDriverRouteLocation({
+      status: "ASSIGNED",
+      pickup,
+      dropoff,
+    });
+    expect(outbound.latitude).toBe(pickup.latitude);
+    const inbound = inferDriverRouteLocation({
+      status: "EN_ROUTE_TO_DROPOFF",
+      pickup,
+      dropoff,
+    });
+    expect(inbound.longitude).toBeLessThan(pickup.longitude);
+    expect(inbound.longitude).toBeGreaterThan(dropoff.longitude);
+    const home = inferDriverRouteLocation({
+      status: "DELIVERED",
+      pickup,
+      dropoff,
+    });
+    expect(home.latitude).toBe(pickup.latitude);
   });
 });

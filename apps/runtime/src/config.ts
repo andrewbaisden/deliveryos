@@ -8,6 +8,7 @@ const schema = z.object({
   HOST: z.string().default("0.0.0.0"),
   REDIS_URL: z.url().default("redis://localhost:6379"),
   WEB_ORIGIN: z.url().default("http://localhost:3000"),
+  DEMO_FLEET_TICKER: z.enum(["true", "false"]).optional(),
   SIMULATION_CREDENTIAL_SECRET: z
     .string()
     .min(32)

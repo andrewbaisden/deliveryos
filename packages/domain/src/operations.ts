@@ -42,6 +42,76 @@ export function createPrng(seed: number): () => number {
 
 export type Coordinate = { latitude: number; longitude: number };
 
+const TOWARD_PICKUP = new Set([
+  "ASSIGNED",
+  "ACCEPTED",
+  "EN_ROUTE_TO_PICKUP",
+  "ARRIVED_PICKUP",
+]);
+const TOWARD_DROPOFF = new Set([
+  "PICKED_UP",
+  "EN_ROUTE_TO_DROPOFF",
+  "ARRIVED_DROPOFF",
+]);
+
+export function interpolateCoordinate(
+  from: Coordinate,
+  to: Coordinate,
+  t: number,
+): Coordinate {
+  const progress = Math.min(1, Math.max(0, t));
+  return {
+    latitude: from.latitude + (to.latitude - from.latitude) * progress,
+    longitude: from.longitude + (to.longitude - from.longitude) * progress,
+  };
+}
+
+export function headingDegrees(from: Coordinate, to: Coordinate): number {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const dLon = radians(to.longitude - from.longitude);
+  const lat1 = radians(from.latitude);
+  const lat2 = radians(to.latitude);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+
+export function inferDriverRouteLocation(input: {
+  status: string;
+  pickup: Coordinate;
+  dropoff: Coordinate;
+}): Coordinate & { headingDegrees: number } {
+  if (TOWARD_PICKUP.has(input.status)) {
+    return {
+      ...input.pickup,
+      headingDegrees: headingDegrees(input.pickup, input.dropoff),
+    };
+  }
+  if (TOWARD_DROPOFF.has(input.status)) {
+    const progress =
+      input.status === "PICKED_UP"
+        ? 0.2
+        : input.status === "ARRIVED_DROPOFF"
+          ? 1
+          : 0.65;
+    const location = interpolateCoordinate(
+      input.pickup,
+      input.dropoff,
+      progress,
+    );
+    return {
+      ...location,
+      headingDegrees: headingDegrees(input.pickup, input.dropoff),
+    };
+  }
+  return {
+    ...input.pickup,
+    headingDegrees: headingDegrees(input.dropoff, input.pickup),
+  };
+}
+
 export function distanceMetres(from: Coordinate, to: Coordinate): number {
   const radius = 6_371_000;
   const radians = (degrees: number) => (degrees * Math.PI) / 180;

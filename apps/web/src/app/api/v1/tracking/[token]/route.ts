@@ -56,7 +56,9 @@ export async function GET(
       const location = await redis.hgetall(
         `deliveryos:org:${delivery.organizationId}:driver:${delivery.assignedDriverId}:location`,
       );
-      const dropoff = delivery.stops.find((stop) => stop.kind === "DROPOFF");
+      const dropoff = [...delivery.stops]
+        .reverse()
+        .find((stop) => stop.kind === "DROPOFF");
       if (
         location.latitude &&
         location.longitude &&

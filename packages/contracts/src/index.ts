@@ -114,10 +114,36 @@ export const simulationConfigSchema = z.object({
   seed: z.int().min(0).max(4_294_967_295),
 });
 
+export const driverStatusWriteSchema = z.enum([
+  "AVAILABLE",
+  "OFFLINE",
+  "ON_BREAK",
+]);
+
+export const createDriverSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  zoneId: uuidSchema.optional().nullable(),
+  maxConcurrentDeliveries: z.int().min(1).max(20).default(1),
+  status: driverStatusWriteSchema.default("AVAILABLE"),
+});
+
+export const updateDriverSchema = z
+  .object({
+    name: z.string().trim().min(2).max(120).optional(),
+    zoneId: uuidSchema.optional().nullable(),
+    maxConcurrentDeliveries: z.int().min(1).max(20).optional(),
+    status: driverStatusWriteSchema.optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required",
+  });
+
 export type TelemetryEvent = z.infer<typeof telemetryEventSchema>;
 export type DeliveryCommandInput = z.infer<typeof deliveryCommandSchema>;
 export type CreateDeliveryInput = z.infer<typeof createDeliverySchema>;
 export type SimulationConfig = z.infer<typeof simulationConfigSchema>;
+export type CreateDriverInput = z.infer<typeof createDriverSchema>;
+export type UpdateDriverInput = z.infer<typeof updateDriverSchema>;
 
 export type ApiErrorCode =
   | "VALIDATION_FAILED"

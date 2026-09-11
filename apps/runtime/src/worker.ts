@@ -1,9 +1,18 @@
+import "./load-env";
 import { createHash, createHmac } from "node:crypto";
 import type { RealtimeEnvelope } from "@deliveryos/contracts";
 import { database } from "@deliveryos/database/client";
 import { distanceMetres } from "@deliveryos/domain";
 import { Worker } from "bullmq";
 import { config } from "./config";
+import {
+  DEMO_DEPOT,
+  DEMO_DROPOFF,
+  DEMO_TICK_MS,
+  demoTickerEnabled,
+  demoTickerPoint,
+  shouldTickDriver,
+} from "./demo-ticker";
 import { observability } from "./observability";
 import {
   evaluateDriverPresence,
@@ -16,7 +25,13 @@ import {
 } from "./queues";
 import { createRedis, locationKey, streamKey } from "./redis";
 import { runTelemetryRetention } from "./retention";
-import { createSimulationAgents, shouldCompleteSimulation } from "./simulation";
+import {
+  createSimulationAgents,
+  shouldCompleteSimulation,
+  simulationFlagsSchema,
+  simulationJourneyPoint,
+  simulationStartFromPickup,
+} from "./simulation";
 import { setLatestLocation } from "./telemetry-projection";
 
 const connection = createRedis();
@@ -170,10 +185,7 @@ async function initializeSimulation(runId: string) {
         latitude: 51.538 + row * 0.002,
         longitude: -0.012 + column * 0.003,
       };
-      const start = {
-        latitude: pickup.latitude + 0.008,
-        longitude: pickup.longitude - 0.01,
-      };
+      const start = simulationStartFromPickup(pickup);
       const dropoff = {
         latitude: 51.51 + (agent.index % 3) * 0.002,
         longitude: -0.132 + (agent.index % 4) * 0.002,
@@ -354,6 +366,106 @@ async function simulationRequest(
   return response;
 }
 
+const demoTickerActiveStatuses = [
+  "ASSIGNED",
+  "ACCEPTED",
+  "EN_ROUTE_TO_PICKUP",
+  "ARRIVED_PICKUP",
+  "PICKED_UP",
+  "EN_ROUTE_TO_DROPOFF",
+  "ARRIVED_DROPOFF",
+] as const;
+
+async function ensureDemoCredential(organizationId: string, driverId: string) {
+  const token = simulationCredential(driverId);
+  const prefix = token.slice(0, 12);
+  await database?.driverCredential.upsert({
+    where: { prefix },
+    update: {},
+    create: {
+      organizationId,
+      driverId,
+      prefix,
+      secretHash: createHash("sha256").update(token).digest("hex"),
+    },
+  });
+}
+
+async function tickDemoFleet() {
+  if (!database || !demoTickerEnabled(config)) return;
+  const drivers = await database.driver.findMany({
+    where: { status: { not: "OFFLINE" } },
+    select: {
+      id: true,
+      organizationId: true,
+      status: true,
+      simulationRun: { select: { status: true } },
+      assignedDeliveries: {
+        where: { status: { in: [...demoTickerActiveStatuses] } },
+        include: { stops: { orderBy: { sequence: "asc" } } },
+        orderBy: { promisedDeliveryAt: "asc" },
+        take: 1,
+      },
+    },
+  });
+  const nowMs = Date.now();
+  const sequence = Math.floor(nowMs / DEMO_TICK_MS);
+  await Promise.all(
+    drivers.map(async (driver) => {
+      try {
+        if (
+          !shouldTickDriver({
+            status: driver.status,
+            simulationRunStatus: driver.simulationRun?.status ?? null,
+          })
+        )
+          return;
+        const job = driver.assignedDeliveries[0];
+        const pickup = job?.stops.find((stop) => stop.kind === "PICKUP");
+        const dropoff = job
+          ? [...job.stops].reverse().find((stop) => stop.kind === "DROPOFF")
+          : undefined;
+        if (job && (!pickup || !dropoff)) return;
+        const point = demoTickerPoint({
+          nowMs,
+          driverId: driver.id,
+          deliveryStatus: job?.status ?? null,
+          pickup: pickup
+            ? {
+                latitude: Number(pickup.latitude),
+                longitude: Number(pickup.longitude),
+              }
+            : DEMO_DEPOT,
+          dropoff: dropoff
+            ? {
+                latitude: Number(dropoff.latitude),
+                longitude: Number(dropoff.longitude),
+              }
+            : DEMO_DROPOFF,
+        });
+        await ensureDemoCredential(driver.organizationId, driver.id);
+        await simulationRequest(driver.id, "/api/v1/telemetry", {
+          eventId: deterministicUuid(`demo:${driver.id}:${sequence}`),
+          driverId: driver.id,
+          deviceSessionId: `demo-ticker-${driver.id}`,
+          sequence,
+          observedAt: new Date(nowMs).toISOString(),
+          latitude: point.latitude,
+          longitude: point.longitude,
+          accuracyM: 12,
+          speedMps: point.speedMps,
+          headingDegrees: point.headingDegrees,
+          batteryPct: 82,
+        });
+      } catch (error) {
+        console.error("demo_fleet_tick_driver_failed", {
+          error: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    }),
+  );
+}
+
 async function tickSimulation(runId: string) {
   if (!database)
     throw new Error("DATABASE_URL is required by the simulation worker");
@@ -374,36 +486,56 @@ async function tickSimulation(runId: string) {
   let completed = 0;
   for (const agent of run.agents) {
     if (run.logicalTimeMs < agent.nextActionAtMs) continue;
+    if (agent.phase === "COMPLETED" || agent.phase === "FAILED") {
+      completed += 1;
+      continue;
+    }
     const delivery = agent.currentDelivery;
+    const pickup = delivery?.stops[0];
+    const dropoff = delivery?.stops[1];
+    const flagsResult = simulationFlagsSchema.safeParse(agent.exceptionFlags);
+    const flags = flagsResult.success ? flagsResult.data : {};
+    const returning =
+      agent.phase === "RETURNING" || delivery?.status === "DELIVERED";
     if (
-      !delivery ||
-      ["DELIVERED", "FAILED", "RETURN_REQUIRED"].includes(delivery.status)
+      !returning &&
+      (!delivery ||
+        ["FAILED", "RETURN_REQUIRED"].includes(delivery.status) ||
+        !pickup ||
+        !dropoff)
     ) {
       completed += 1;
       continue;
     }
-    const sequence = agent.telemetrySequence + 1;
-    const pickup = delivery.stops[0];
-    const dropoff = delivery.stops[1];
     if (!pickup || !dropoff)
       throw new Error("Simulation delivery is missing stops");
-    const flags = agent.exceptionFlags as {
-      exception?: string;
-      speedMps?: number;
-    };
+    const sequence = agent.telemetrySequence + 1;
+    const returnTicks = returning ? (flags.returnTicks ?? 0) + 1 : 0;
     const trafficFactor = flags.exception === "TRAFFIC" ? 0.55 : 1;
-    const progress = Math.min(1, (sequence / 12) * trafficFactor);
     const deviation =
-      flags.exception === "DEVIATION" && sequence >= 5 && sequence <= 8
+      !returning &&
+      flags.exception === "DEVIATION" &&
+      sequence >= 5 &&
+      sequence <= 8
         ? 0.003
         : 0;
-    const latitude =
-      Number(pickup.latitude) +
-      (Number(dropoff.latitude) - Number(pickup.latitude)) * progress +
-      deviation;
-    const longitude =
-      Number(pickup.longitude) +
-      (Number(dropoff.longitude) - Number(pickup.longitude)) * progress;
+    const journey = simulationJourneyPoint({
+      phase: returning ? "RETURNING" : (delivery?.status ?? "ASSIGNED"),
+      deliveryStatus: returning
+        ? "DELIVERED"
+        : (delivery?.status ?? "ASSIGNED"),
+      pickup: {
+        latitude: Number(pickup.latitude),
+        longitude: Number(pickup.longitude),
+      },
+      dropoff: {
+        latitude: Number(dropoff.latitude),
+        longitude: Number(dropoff.longitude),
+      },
+      sequence: Math.max(1, Math.round(sequence * trafficFactor)),
+      returnTicks,
+      deviation,
+    });
     const suppressTelemetry =
       flags.exception === "OFFLINE" && sequence >= 4 && sequence <= 8;
     if (!suppressTelemetry) {
@@ -413,13 +545,49 @@ async function tickSimulation(runId: string) {
         deviceSessionId: `simulation-${run.id}`,
         sequence,
         observedAt: new Date().toISOString(),
-        latitude,
-        longitude,
+        latitude: journey.coordinate.latitude,
+        longitude: journey.coordinate.longitude,
         accuracyM: 8,
         speedMps: flags.speedMps ?? 9,
-        headingDegrees: 115,
+        headingDegrees: journey.headingDegrees,
         batteryPct: Math.max(20, 100 - sequence),
       });
+    }
+    if (returning) {
+      if (journey.returnComplete) {
+        await database.driver.update({
+          where: { id: agent.driverId },
+          data: { status: "AVAILABLE", version: { increment: 1 } },
+        });
+        await database.simulationAgent.update({
+          where: { id: agent.id },
+          data: {
+            telemetrySequence: sequence,
+            routePositionM: journey.routePositionM,
+            phase: "COMPLETED",
+            currentDeliveryId: null,
+            exceptionFlags: { ...flags, returnTicks },
+            nextActionAtMs: BigInt(Number(run.logicalTimeMs) + 5_000),
+          },
+        });
+        completed += 1;
+        continue;
+      }
+      await database.simulationAgent.update({
+        where: { id: agent.id },
+        data: {
+          telemetrySequence: sequence,
+          routePositionM: journey.routePositionM,
+          phase: "RETURNING",
+          exceptionFlags: { ...flags, returnTicks },
+          nextActionAtMs: BigInt(Number(run.logicalTimeMs) + 5_000),
+        },
+      });
+      continue;
+    }
+    if (!delivery) {
+      completed += 1;
+      continue;
     }
     const shouldFail =
       flags.exception === "FAILED_DELIVERY" &&
@@ -442,27 +610,20 @@ async function tickSimulation(runId: string) {
       where: { id: agent.id },
       data: {
         telemetrySequence: sequence,
-        routePositionM:
-          progress *
-          distanceMetres(
-            {
-              latitude: Number(pickup.latitude),
-              longitude: Number(pickup.longitude),
-            },
-            {
-              latitude: Number(dropoff.latitude),
-              longitude: Number(dropoff.longitude),
-            },
-          ),
+        routePositionM: journey.routePositionM,
         phase: shouldFail
           ? "FAILED"
           : lifecycle?.slug === "complete"
-            ? "COMPLETED"
+            ? "RETURNING"
             : delivery.status,
+        exceptionFlags: {
+          ...flags,
+          returnTicks: lifecycle?.slug === "complete" ? 0 : flags.returnTicks,
+        },
         nextActionAtMs: BigInt(Number(run.logicalTimeMs) + 5_000),
       },
     });
-    if (shouldFail || lifecycle?.slug === "complete") completed += 1;
+    if (shouldFail) completed += 1;
   }
   const logicalTimeMs = run.logicalTimeMs + BigInt(5_000 * run.speed);
   if (
@@ -618,6 +779,29 @@ const presencePoller = setInterval(() => {
     });
 }, 30_000);
 
+let tickingDemoFleet = false;
+const demoFleetTicker = demoTickerEnabled(config)
+  ? setInterval(() => {
+      if (tickingDemoFleet) return;
+      tickingDemoFleet = true;
+      void tickDemoFleet()
+        .catch((error) =>
+          console.error("demo_fleet_ticker_failed", {
+            error: error instanceof Error ? error.message : "unknown",
+          }),
+        )
+        .finally(() => {
+          tickingDemoFleet = false;
+        });
+    }, DEMO_TICK_MS)
+  : null;
+if (demoFleetTicker)
+  void tickDemoFleet().catch((error) =>
+    console.error("demo_fleet_ticker_start_failed", {
+      error: error instanceof Error ? error.message : "unknown",
+    }),
+  );
+
 let retaining = false;
 const retentionPoller = setInterval(() => {
   if (retaining) return;
@@ -642,6 +826,7 @@ async function shutdown() {
   clearInterval(heartbeat);
   clearInterval(outboxPoller);
   clearInterval(presencePoller);
+  if (demoFleetTicker) clearInterval(demoFleetTicker);
   clearInterval(retentionPoller);
   await Promise.all([telemetryWorker.close(), simulationWorker.close()]);
   await stateRedis.quit();
@@ -653,4 +838,6 @@ process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 console.info("deliveryos_worker_started", {
   redis: new URL(config.REDIS_URL).host,
+  database: database ? "configured" : "unavailable",
+  demoFleetTicker: demoTickerEnabled(config),
 });

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { SignOutControl } from "@/components/sign-out-control";
 import { requirePageMembership } from "@/lib/page-auth";
 import { ensureRedis } from "@/lib/redis";
 
@@ -50,12 +51,6 @@ export async function AppShell({
   } catch {
     workerLive = false;
   }
-  const initials = session.user.name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -92,13 +87,10 @@ export async function AppShell({
               <strong>{workerLive ? "Live" : "No heartbeat"}</strong>
             </div>
           </div>
-          <div className="profile">
-            <span className="avatar">{initials}</span>
-            <div>
-              <strong>{session.user.name}</strong>
-              <span>{membership.role.toLowerCase()}</span>
-            </div>
-          </div>
+          <SignOutControl
+            name={session.user.name}
+            membershipRole={membership.role}
+          />
         </div>
       </aside>
       <main className="main">

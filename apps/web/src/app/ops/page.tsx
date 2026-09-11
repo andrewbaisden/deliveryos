@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   ArrowRight,
   Box,
-  CircleAlert,
   Clock3,
   Plus,
   Truck,
@@ -11,7 +10,7 @@ import {
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { FleetMap } from "@/components/fleet-map";
-import { StatusBadge } from "@/components/status-badge";
+import { OpsLivePanels } from "@/components/ops-live-panels";
 import { requirePageMembership } from "@/lib/page-auth";
 
 const activeStatuses = [
@@ -68,15 +67,25 @@ export default async function OperationsPage() {
       },
     }),
     database.operationalAlert.findMany({
-      where: { organizationId: organization.id, status: "OPEN" },
+      where: {
+        organizationId: organization.id,
+        status: { in: ["OPEN", "ACKNOWLEDGED"] },
+      },
       orderBy: [{ severity: "desc" }, { openedAt: "desc" }],
-      take: 3,
     }),
     database.driver.findMany({
       where: { organizationId: organization.id },
-      include: { zone: { select: { name: true } } },
+      include: {
+        zone: { select: { name: true } },
+        _count: {
+          select: {
+            assignedDeliveries: {
+              where: { status: { in: [...activeStatuses] } },
+            },
+          },
+        },
+      },
       orderBy: { name: "asc" },
-      take: 4,
     }),
   ]);
   const metrics = [
@@ -146,72 +155,25 @@ export default async function OperationsPage() {
             </div>
             <FleetMap organizationId={organization.id} />
           </article>
-          <div className="stack">
-            <article className="card">
-              <div className="card-head">
-                <div>
-                  <h2>Needs attention</h2>
-                  <p>{alerts.length} open operational alerts</p>
-                </div>
-                <CircleAlert size={16} color="#b6493d" />
-              </div>
-              <ul className="alert-list">
-                {alerts.map((alert) => (
-                  <li className="alert-row" key={alert.id}>
-                    <span className="alert-symbol red">
-                      <AlertTriangle />
-                    </span>
-                    <div>
-                      <strong>{alert.message}</strong>
-                      <p>{alert.type.replaceAll("_", " ")}</p>
-                    </div>
-                    <StatusBadge value={alert.severity} />
-                  </li>
-                ))}
-                {alerts.length === 0 && (
-                  <li className="alert-row">
-                    <div>
-                      <strong>No open alerts</strong>
-                      <p>The operation is within configured thresholds.</p>
-                    </div>
-                  </li>
-                )}
-              </ul>
-            </article>
-            <article className="card">
-              <div className="card-head">
-                <div>
-                  <h2>Driver capacity</h2>
-                  <p>{drivers.length} fleet members shown</p>
-                </div>
-                <Link href="/ops/drivers" className="inline-link">
-                  View all
-                </Link>
-              </div>
-              <ul className="driver-list">
-                {drivers.map((driver) => (
-                  <li className="driver-row" key={driver.id}>
-                    <span className="avatar">
-                      {driver.name
-                        .split(" ")
-                        .map((part) => part[0])
-                        .join("")}
-                    </span>
-                    <div>
-                      <strong>{driver.name}</strong>
-                      <p>
-                        {driver.zone?.name ?? "Unzoned"} · Driver{" "}
-                        {driver.id.slice(-4)}
-                      </p>
-                    </div>
-                    <div className="driver-meta">
-                      <StatusBadge value={driver.status} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </article>
-          </div>
+          <OpsLivePanels
+            organizationId={organization.id}
+            initial={{
+              alerts: alerts.map((alert) => ({
+                id: alert.id,
+                message: alert.message,
+                type: alert.type,
+                severity: alert.severity,
+              })),
+              drivers: drivers.map((driver) => ({
+                id: driver.id,
+                name: driver.name,
+                status: driver.status,
+                activeLoad: driver._count.assignedDeliveries,
+                maxConcurrentDeliveries: driver.maxConcurrentDeliveries,
+                zone: driver.zone,
+              })),
+            }}
+          />
         </section>
       </div>
     </AppShell>

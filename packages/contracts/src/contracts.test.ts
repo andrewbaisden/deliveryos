@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  createDriverSchema,
   telemetryBatchSchema,
   telemetryEventSchema,
+  updateDriverSchema,
   validateTelemetryTime,
 } from ".";
 
@@ -56,6 +58,29 @@ describe("telemetry contract", () => {
   it("rejects negative sequence numbers", () => {
     expect(
       telemetryEventSchema.safeParse({ ...event, sequence: -1 }).success,
+    ).toBe(false);
+  });
+});
+
+describe("driver contracts", () => {
+  it("creates a driver with defaults", () => {
+    expect(createDriverSchema.parse({ name: "Maya Patel" })).toEqual({
+      name: "Maya Patel",
+      maxConcurrentDeliveries: 1,
+      status: "AVAILABLE",
+    });
+  });
+
+  it("rejects empty driver updates", () => {
+    expect(updateDriverSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("rejects operational statuses that dispatchers cannot set", () => {
+    expect(
+      createDriverSchema.safeParse({
+        name: "Maya Patel",
+        status: "ON_DELIVERY",
+      }).success,
     ).toBe(false);
   });
 });

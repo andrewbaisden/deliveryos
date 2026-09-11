@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "worker": "tsx watch src/worker.ts",
-    "start": "tsx src/server.ts",
-    "start:worker": "tsx src/worker.ts",
-    "soak:100": "tsx scripts/soak.ts",
+    "dev": "tsx watch --env-file=../../.env src/server.ts",
+    "worker": "tsx watch --env-file=../../.env src/worker.ts",
+    "start": "tsx --env-file=../../.env src/server.ts",
+    "start:worker": "tsx --env-file=../../.env src/worker.ts",
+    "soak:100": "tsx --env-file=../../.env scripts/soak.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "tsc --noEmit"

@@ -112,9 +112,15 @@ export default async function DeliveryDetailPage({
                   </span>
                 </div>
                 <div>
+                  <span className="label">Route</span>
+                  <span className="value">
+                    {delivery.externalReference ?? "—"}
+                  </span>
+                </div>
+                <div>
                   <span className="label">Drop-off</span>
                   <span className="value">
-                    {delivery.stops[1]?.addressLine1 ?? "—"}
+                    {delivery.stops.at(-1)?.addressLine1 ?? "—"}
                   </span>
                 </div>
                 <div>

@@ -1,5 +1,12 @@
 import type { SimulationConfig } from "@deliveryos/contracts";
-import { createPrng } from "@deliveryos/domain";
+import {
+  type Coordinate,
+  createPrng,
+  distanceMetres,
+  headingDegrees,
+  interpolateCoordinate,
+} from "@deliveryos/domain";
+import { z } from "zod";
 
 export const scenarioPresets = {
   NORMAL_SHIFT: {
@@ -73,4 +80,73 @@ export function shouldCompleteSimulation(
 ) {
   if (totalAgents === 0 || completedAgents !== totalAgents) return false;
   return driverCount !== 100 || logicalTimeMs >= 10 * 60_000;
+}
+
+export const SIMULATION_RETURN_TICKS = 8;
+
+export const simulationFlagsSchema = z.object({
+  exception: z
+    .enum(["NONE", "TRAFFIC", "DEVIATION", "OFFLINE", "FAILED_DELIVERY"])
+    .optional(),
+  speedMps: z.number().optional(),
+  returnTicks: z.number().int().nonnegative().optional(),
+});
+
+export function simulationStartFromPickup(pickup: Coordinate): Coordinate {
+  return {
+    latitude: pickup.latitude + 0.008,
+    longitude: pickup.longitude - 0.01,
+  };
+}
+
+export function simulationJourneyPoint(input: {
+  phase: string;
+  deliveryStatus: string;
+  pickup: Coordinate;
+  dropoff: Coordinate;
+  sequence: number;
+  returnTicks: number;
+  deviation: number;
+}): {
+  coordinate: Coordinate;
+  headingDegrees: number;
+  returnComplete: boolean;
+  routePositionM: number;
+} {
+  if (input.phase === "RETURNING" || input.deliveryStatus === "DELIVERED") {
+    const progress = Math.min(1, input.returnTicks / SIMULATION_RETURN_TICKS);
+    const coordinate = interpolateCoordinate(
+      input.dropoff,
+      input.pickup,
+      progress,
+    );
+    return {
+      coordinate,
+      headingDegrees: headingDegrees(input.dropoff, input.pickup),
+      returnComplete: progress >= 1,
+      routePositionM: distanceMetres(input.dropoff, coordinate),
+    };
+  }
+  const towardDropoff = [
+    "PICKED_UP",
+    "EN_ROUTE_TO_DROPOFF",
+    "ARRIVED_DROPOFF",
+  ].includes(input.deliveryStatus);
+  const from = towardDropoff
+    ? input.pickup
+    : simulationStartFromPickup(input.pickup);
+  const to = towardDropoff ? input.dropoff : input.pickup;
+  const durationTicks = towardDropoff ? 12 : 6;
+  const progress = Math.min(1, input.sequence / durationTicks);
+  const traveled = interpolateCoordinate(from, to, progress);
+  const coordinate = {
+    latitude: traveled.latitude + input.deviation,
+    longitude: traveled.longitude,
+  };
+  return {
+    coordinate,
+    headingDegrees: headingDegrees(from, to),
+    returnComplete: false,
+    routePositionM: distanceMetres(from, coordinate),
+  };
 }

@@ -1,14 +1,13 @@
 "use client";
 
-import {
-  type GeoJSONSource,
-  type Map as MapInstance,
-  setWorkerUrl,
-} from "maplibre-gl";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { publicEnv } from "@/lib/public-env";
-
-setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
+import { PlayfieldScene } from "@/components/playfield-scene";
+import {
+  PLAYFIELDS,
+  type PlayfieldStyle,
+  readStoredPlayfieldStyle,
+  storePlayfieldStyle,
+} from "@/lib/playfield";
 
 type DriverPoint = {
   id: string;
@@ -16,46 +15,31 @@ type DriverPoint = {
   presence: string;
   latitude: number;
   longitude: number;
+  headingDegrees: number | null;
   observedAt: string;
+  routeCode: string | null;
 };
 
 export function FleetMap({ organizationId }: { organizationId: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<MapInstance | null>(null);
   const pointsRef = useRef<Record<string, DriverPoint>>({});
   const frameRef = useRef<number | null>(null);
   const cursorRef = useRef("0");
   const [points, setPoints] = useState<DriverPoint[]>([]);
-  const [mapReady, setMapReady] = useState(false);
+  const [style, setStyle] = useState<PlayfieldStyle>("isometric");
 
   const flushPoints = useCallback(() => {
     frameRef.current = null;
-    const next = Object.values(pointsRef.current);
-    setPoints(next);
-    const source = mapRef.current?.getSource("drivers") as
-      | GeoJSONSource
-      | undefined;
-    source?.setData({
-      type: "FeatureCollection",
-      features: next.map((point) => ({
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: [point.longitude, point.latitude],
-        },
-        properties: {
-          id: point.id,
-          name: point.name,
-          presence: point.presence,
-        },
-      })),
-    });
+    setPoints(Object.values(pointsRef.current));
   }, []);
 
   const scheduleFlush = useCallback(() => {
     if (frameRef.current === null)
       frameRef.current = requestAnimationFrame(flushPoints);
   }, [flushPoints]);
+
+  useEffect(() => {
+    setStyle(readStoredPlayfieldStyle());
+  }, []);
 
   const loadSnapshot = useCallback(async () => {
     const response = await fetch(
@@ -72,6 +56,7 @@ export function FleetMap({ organizationId }: { organizationId: string }) {
             id: string;
             name: string;
             presence: string;
+            routeCode?: string | null;
             location: DriverPoint;
           }) => [
             driver.id,
@@ -81,7 +66,9 @@ export function FleetMap({ organizationId }: { organizationId: string }) {
               presence: driver.presence,
               latitude: driver.location.latitude,
               longitude: driver.location.longitude,
+              headingDegrees: driver.location.headingDegrees ?? null,
               observedAt: driver.location.observedAt,
+              routeCode: driver.routeCode ?? null,
             },
           ],
         ),
@@ -91,6 +78,7 @@ export function FleetMap({ organizationId }: { organizationId: string }) {
 
   useEffect(() => {
     void loadSnapshot();
+    const snapshotTimer = setInterval(() => void loadSnapshot(), 4_000);
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
@@ -117,6 +105,7 @@ export function FleetMap({ organizationId }: { organizationId: string }) {
           payload?: {
             latitude: number;
             longitude: number;
+            headingDegrees?: number | null;
             observedAt: string;
           };
         };
@@ -135,11 +124,12 @@ export function FleetMap({ organizationId }: { organizationId: string }) {
           presence: "LIVE",
           latitude: envelope.payload.latitude,
           longitude: envelope.payload.longitude,
+          headingDegrees: envelope.payload.headingDegrees ?? null,
           observedAt: envelope.payload.observedAt,
+          routeCode: existing?.routeCode ?? null,
         };
         scheduleFlush();
       };
-      // Gateway emits named `update` events; `onmessage` only receives unnamed ones.
       source.addEventListener("update", applyUpdate);
       source.onmessage = applyUpdate;
       source.addEventListener("stream.reset", () => {
@@ -159,103 +149,39 @@ export function FleetMap({ organizationId }: { organizationId: string }) {
     return () => {
       disposed = true;
       source?.close();
+      clearInterval(snapshotTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     };
   }, [loadSnapshot, organizationId, scheduleFlush]);
 
-  useEffect(() => {
-    if (!containerRef.current || !publicEnv.mapboxToken) return;
-    let disposed = false;
-    void import("maplibre-gl").then((maplibre) => {
-      if (disposed || !containerRef.current) return;
-      const map = new maplibre.Map({
-        container: containerRef.current,
-        center: [-0.063, 51.527],
-        zoom: 11.2,
-        style: {
-          version: 8,
-          sources: {
-            mapbox: {
-              type: "raster",
-              tiles: [
-                `https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/512/{z}/{x}/{y}@2x?access_token=${publicEnv.mapboxToken}`,
-              ],
-              tileSize: 512,
-              attribution: "© Mapbox © OpenStreetMap",
-            },
-          },
-          layers: [{ id: "basemap", type: "raster", source: "mapbox" }],
-        },
-      });
-      mapRef.current = map;
-      map.addControl(
-        new maplibre.NavigationControl({ showCompass: false }),
-        "bottom-left",
-      );
-      map.on("load", () => {
-        map.addSource("drivers", {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
-        });
-        map.addLayer({
-          id: "drivers",
-          type: "circle",
-          source: "drivers",
-          paint: {
-            "circle-radius": 8,
-            "circle-color": [
-              "case",
-              ["==", ["get", "presence"], "LIVE"],
-              "#1f9d68",
-              "#d08b2e",
-            ],
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 2,
-          },
-        });
-        setMapReady(true);
-        scheduleFlush();
-      });
-    });
-    return () => {
-      disposed = true;
-      mapRef.current?.remove();
-      mapRef.current = null;
-    };
-  }, [scheduleFlush]);
+  function chooseStyle(next: PlayfieldStyle) {
+    setStyle(next);
+    storePlayfieldStyle(next);
+  }
 
   return (
     <div className="map-wrap">
-      <div className="map" ref={containerRef} />
-      {!mapReady && (
-        <div className="map-placeholder">
-          <div className="river" />
-          <div className="route-line" />
-          {points.map((point) => (
-            <div
-              className={`map-marker ${point.presence === "STALE" ? "stale" : ""}`}
-              style={{
-                left: `${Math.max(4, Math.min(94, 50 + (point.longitude + 0.063) * 400))}%`,
-                top: `${Math.max(4, Math.min(90, 50 - (point.latitude - 51.527) * 400))}%`,
-              }}
-              key={point.id}
-            >
-              <span>
-                {point.name
-                  .split(" ")
-                  .map((part) => part[0])
-                  .join("")
-                  .slice(0, 2)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+      <PlayfieldScene style={style} actors={points} />
       <div className="map-overlay">
         <span className="map-pill">Drivers · {points.length}</span>
+        <span className="map-pill">Zones · E / C</span>
         <span className="map-pill">Live stream</span>
       </div>
+      <fieldset className="map-style-toggle">
+        <legend className="sr-only">Map style</legend>
+        {(Object.keys(PLAYFIELDS) as PlayfieldStyle[]).map((value) => (
+          <button
+            type="button"
+            className={value === style ? "active" : ""}
+            aria-pressed={value === style}
+            onClick={() => chooseStyle(value)}
+            key={value}
+          >
+            {PLAYFIELDS[value].label}
+          </button>
+        ))}
+      </fieldset>
       <section
         className="map-list"
         aria-label="Live driver location alternative"
@@ -263,7 +189,10 @@ export function FleetMap({ organizationId }: { organizationId: string }) {
         {points.length === 0
           ? "No current telemetry"
           : points
-              .map((point) => `${point.name}: ${point.presence}`)
+              .map(
+                (point) =>
+                  `${point.routeCode ? `${point.routeCode} ` : ""}${point.name}: ${point.presence}`,
+              )
               .join(" · ")}
       </section>
     </div>

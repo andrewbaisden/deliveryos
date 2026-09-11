@@ -1,5 +1,6 @@
 import { Truck } from "lucide-react";
 import { DriverWorkflow } from "@/components/driver-workflow";
+import { SignOutControl } from "@/components/sign-out-control";
 import { requirePageMembership } from "@/lib/page-auth";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,13 @@ export default async function DriverPage() {
             <Truck size={17} />
           </span>
           DeliveryOS Driver
+          <span style={{ marginLeft: "auto" }}>
+            <SignOutControl
+              name={driver.name}
+              membershipRole="DRIVER"
+              variant="inline"
+            />
+          </span>
         </div>
       </div>
       <DriverWorkflow

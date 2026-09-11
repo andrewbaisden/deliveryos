@@ -1,3 +1,4 @@
+import "./load-env";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { z } from "zod";

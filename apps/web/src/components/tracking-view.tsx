@@ -2,6 +2,7 @@
 
 import { Check, Truck } from "lucide-react";
 import { useEffect, useState } from "react";
+import { PlayfieldScene } from "@/components/playfield-scene";
 
 type Projection = {
   reference: string;
@@ -134,20 +135,22 @@ export function TrackingView({ token }: { token: string }) {
             )}
           </div>
           {projection?.approximateLocation && (
-            <div
-              className="tracking-map"
-              role="img"
-              aria-label="Approximate driver location"
-            >
-              <div className="map-placeholder">
-                <div className="river" />
-                <div className="route-line" />
-                <div className="map-marker" style={{ left: "67%", top: "44%" }}>
-                  <span>
-                    {projection.driver?.displayName.slice(0, 2).toUpperCase()}
-                  </span>
-                </div>
-              </div>
+            <div className="tracking-map">
+              <PlayfieldScene
+                style="flat"
+                showLandmarks={false}
+                label="Approximate driver location"
+                actors={[
+                  {
+                    id: "driver",
+                    name: projection.driver?.displayName ?? "Driver",
+                    presence: "LIVE",
+                    latitude: projection.approximateLocation.latitude,
+                    longitude: projection.approximateLocation.longitude,
+                    headingDegrees: null,
+                  },
+                ]}
+              />
             </div>
           )}
           <div className="tracking-note">
