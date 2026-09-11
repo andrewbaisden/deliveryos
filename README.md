@@ -2,6 +2,8 @@
 
 DeliveryOS is a production-oriented last-mile delivery operations platform. It separates authoritative delivery state from high-frequency vehicle telemetry and includes a deterministic simulator that enters the same HTTP, validation, queue, and domain pipelines as real drivers.
 
+![DeliveryOS](./docs/deliveryos.png)
+
 ## Product surfaces
 
 - Operations health dashboard, searchable deliveries, live fleet map, alerts, history, and analytics
