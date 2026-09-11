@@ -1,0 +1,27 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!!**/.next",
+      "!!**/coverage",
+      "!!**/generated",
+      "!!apps/web/public/maplibre",
+      "!!playwright-report",
+      "!!test-results",
+      "!!pnpm-lock.yaml"
+    ]
+  },
+  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": { "noDescendingSpecificity": "off" }
+    }
+  },
+  "javascript": {
+    "formatter": { "quoteStyle": "double", "semicolons": "always" }
+  },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } }
+}

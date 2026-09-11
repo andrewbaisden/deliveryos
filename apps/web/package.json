@@ -1,0 +1,50 @@
+{
+  "name": "@deliveryos/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/copy-maplibre-worker.mjs",
+    "dev": "next dev",
+    "prebuild": "node scripts/copy-maplibre-worker.mjs",
+    "build": "next build --webpack",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@deliveryos/contracts": "workspace:*",
+    "@deliveryos/database": "workspace:*",
+    "@deliveryos/domain": "workspace:*",
+    "@deliveryos/providers": "workspace:*",
+    "@hookform/resolvers": "^5.2.1",
+    "@prisma/client": "^7.0.0",
+    "@tanstack/react-query": "^5.87.1",
+    "better-auth": "^1.7.3",
+    "bullmq": "^5.58.5",
+    "ioredis": "^5.7.0",
+    "lucide-react": "^0.542.0",
+    "maplibre-gl": "^6.9.0",
+    "next": "^16.0.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-hook-form": "^7.62.0",
+    "zod": "^4.1.5",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.13",
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.3.1",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "jsdom": "^26.1.0",
+    "tailwindcss": "^4.1.13",
+    "dotenv": "^17.2.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

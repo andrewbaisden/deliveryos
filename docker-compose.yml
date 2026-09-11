@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: deliveryos
+      POSTGRES_USER: deliveryos
+      POSTGRES_PASSWORD: deliveryos
+    ports:
+      - "5434:5432"
+    volumes:
+      - deliveryos-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deliveryos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - deliveryos-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  deliveryos-postgres:
+  deliveryos-redis:

@@ -1,0 +1,50 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: deliveryos_test
+          POSTGRES_USER: deliveryos
+          POSTGRES_PASSWORD: deliveryos
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U deliveryos"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://deliveryos:deliveryos@localhost:5432/deliveryos_test
+      DIRECT_URL: postgresql://deliveryos:deliveryos@localhost:5432/deliveryos_test
+      REDIS_URL: redis://localhost:6379
+      BETTER_AUTH_SECRET: ci-secret-at-least-thirty-two-characters
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_RUNTIME_URL: http://localhost:4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 12.3.4 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm --filter @deliveryos/database migrate:deploy
+      - run: pnpm check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e

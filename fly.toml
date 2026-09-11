@@ -1,0 +1,25 @@
+app = "deliveryos-runtime"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "apps/runtime/Dockerfile"
+
+[processes]
+  gateway = "pnpm --filter @deliveryos/runtime start"
+  worker = "pnpm --filter @deliveryos/runtime start:worker"
+
+[[services]]
+  processes = ["gateway"]
+  internal_port = 4000
+  protocol = "tcp"
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "2s"
+    method = "GET"
+    path = "/health/ready"

@@ -1,0 +1,554 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MembershipRole {
+  ADMIN
+  DISPATCHER
+  DRIVER
+}
+enum DriverStatus {
+  OFFLINE
+  AVAILABLE
+  ASSIGNED
+  ON_DELIVERY
+  ON_BREAK
+}
+enum VehicleType {
+  CAR
+  VAN
+  BIKE
+  CARGO_BIKE
+}
+enum VehicleStatus {
+  ACTIVE
+  INACTIVE
+}
+enum DeliveryStatus {
+  UNASSIGNED
+  ASSIGNED
+  ACCEPTED
+  EN_ROUTE_TO_PICKUP
+  ARRIVED_PICKUP
+  PICKED_UP
+  EN_ROUTE_TO_DROPOFF
+  ARRIVED_DROPOFF
+  DELIVERED
+  FAILED
+  CANCELLED
+  RETURN_REQUIRED
+}
+enum DeliveryPriority {
+  STANDARD
+  HIGH
+  URGENT
+}
+enum DeliveryRisk {
+  ON_TIME
+  AT_RISK
+  DELAYED
+}
+enum StopKind {
+  PICKUP
+  DROPOFF
+}
+enum AssignmentEndReason {
+  UNASSIGNED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+enum RouteLegType {
+  TO_PICKUP
+  TO_DROPOFF
+}
+enum RouteStatus {
+  PENDING
+  READY
+  FAILED
+  STALE
+}
+enum AggregateType {
+  DELIVERY
+  DRIVER
+  ALERT
+  SIMULATION
+}
+enum ActorType {
+  USER
+  DRIVER
+  SYSTEM
+  SIMULATOR
+}
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+enum AlertType {
+  DELIVERY_AT_RISK
+  DELIVERY_DELAYED
+  DRIVER_STALE
+  DRIVER_OFFLINE
+  ROUTE_DEVIATION
+  PICKUP_WAIT
+}
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+enum SimulationScenario {
+  NORMAL_SHIFT
+  PEAK_PERIOD
+  DISRUPTION
+  LATE_SHIFT
+}
+enum SimulationStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  STOPPED
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id            String       @id @default(uuid()) @db.Uuid
+  name          String
+  email         String       @unique
+  emailVerified Boolean      @default(false)
+  image         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  memberships   Membership[]
+  driver        Driver?
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id @default(uuid()) @db.Uuid
+  accountId             String
+  providerId            String
+  userId                String    @db.Uuid
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model Verification {
+  id         String    @id @default(uuid()) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  @@index([identifier])
+}
+
+model Organization {
+  id             String             @id @default(uuid()) @db.Uuid
+  name           String
+  slug           String             @unique
+  timeZone       String             @default("Europe/London")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  memberships    Membership[]
+  zones          Zone[]
+  vehicles       Vehicle[]
+  drivers        Driver[]
+  customers      Customer[]
+  deliveries     Delivery[]
+  assignments    DeliveryAssignment[]
+  routes         Route[]
+  events         DomainEvent[]
+  outbox         OutboxEvent[]
+  idempotency    IdempotencyRecord[]
+  snapshots      DriverLocationSnapshot[]
+  trackingTokens TrackingToken[]
+  alerts         OperationalAlert[]
+  simulations    SimulationRun[]
+}
+
+model Membership {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  userId         String         @db.Uuid
+  role           MembershipRole
+  createdAt      DateTime       @default(now())
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model Zone {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  name           String
+  boundary       Json?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries     Delivery[]
+  drivers        Driver[]
+  @@unique([organizationId, name])
+  @@unique([organizationId, id])
+}
+
+model Vehicle {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  type           VehicleType
+  label          String
+  registration   String?
+  capacity       Int           @default(1)
+  status         VehicleStatus @default(ACTIVE)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  drivers        Driver[]
+  @@unique([organizationId, label])
+  @@unique([organizationId, id])
+}
+
+model Driver {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  organizationId          String                 @db.Uuid
+  userId                  String?                @unique @db.Uuid
+  vehicleId               String?                @db.Uuid
+  zoneId                  String?                @db.Uuid
+  simulationRunId         String?                @db.Uuid
+  name                    String
+  status                  DriverStatus           @default(OFFLINE)
+  maxConcurrentDeliveries Int                    @default(1)
+  version                 Int                    @default(1)
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  organization            Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                    User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  vehicle                 Vehicle?               @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  zone                    Zone?                  @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  simulationRun           SimulationRun?         @relation(fields: [simulationRunId], references: [id], onDelete: Cascade)
+  assignedDeliveries      Delivery[]
+  assignments             DeliveryAssignment[]
+  credentials             DriverCredential[]
+  snapshots               DriverLocationSnapshot[]
+  events                  DomainEvent[]
+  alerts                  OperationalAlert[]
+  simulationAgent         SimulationAgent?
+  @@unique([organizationId, id])
+  @@index([organizationId, status])
+}
+
+model DriverCredential {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  driverId       String       @db.Uuid
+  prefix         String       @unique
+  secretHash     String       @unique
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  driver         Driver       @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  @@index([organizationId, driverId])
+}
+
+model Customer {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  name           String
+  email          String?
+  phone          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries     Delivery[]
+  @@unique([organizationId, id])
+  @@index([organizationId, name])
+}
+
+model Delivery {
+  id                    String               @id @default(uuid()) @db.Uuid
+  organizationId        String               @db.Uuid
+  customerId            String               @db.Uuid
+  zoneId                String?              @db.Uuid
+  assignedDriverId      String?              @db.Uuid
+  simulationRunId       String?              @db.Uuid
+  reference             String
+  externalReference     String?
+  status                DeliveryStatus       @default(UNASSIGNED)
+  priority              DeliveryPriority     @default(STANDARD)
+  risk                  DeliveryRisk         @default(ON_TIME)
+  version               Int                  @default(1)
+  packageCount          Int                  @default(1)
+  internalInstructions  String?
+  plannedPickupAt       DateTime
+  promisedDeliveryAt    DateTime
+  originalEtaAt         DateTime?
+  currentEtaAt          DateTime?
+  actualPickupAt        DateTime?
+  actualDeliveryAt      DateTime?
+  recipientName         String?
+  proofNote             String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  organization          Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer              Customer             @relation(fields: [customerId], references: [id])
+  zone                  Zone?                @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  assignedDriver        Driver?              @relation(fields: [assignedDriverId], references: [id], onDelete: SetNull)
+  simulationRun         SimulationRun?       @relation(fields: [simulationRunId], references: [id], onDelete: Cascade)
+  stops                 DeliveryStop[]
+  assignments           DeliveryAssignment[]
+  routes                Route[]
+  events                DomainEvent[]
+  trackingTokens        TrackingToken[]
+  alerts                OperationalAlert[]
+  simulationAgents      SimulationAgent[]
+  @@unique([organizationId, reference])
+  @@unique([organizationId, id])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, risk, status])
+  @@index([assignedDriverId, status])
+}
+
+model DeliveryStop {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  deliveryId      String    @db.Uuid
+  sequence        Int
+  kind            StopKind
+  addressLine1    String
+  addressLine2    String?
+  city            String
+  postalCode      String
+  latitude        Decimal   @db.Decimal(9, 6)
+  longitude       Decimal   @db.Decimal(9, 6)
+  instructions    String?
+  geofenceRadiusM Int       @default(75)
+  arrivedAt       DateTime?
+  completedAt     DateTime?
+  delivery        Delivery  @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  @@unique([deliveryId, sequence])
+  @@index([organizationId, deliveryId])
+}
+
+model DeliveryAssignment {
+  id             String              @id @default(uuid()) @db.Uuid
+  organizationId String              @db.Uuid
+  deliveryId     String              @db.Uuid
+  driverId       String              @db.Uuid
+  assignedById   String?             @db.Uuid
+  assignedAt     DateTime            @default(now())
+  endedAt        DateTime?
+  endReason      AssignmentEndReason?
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  delivery       Delivery            @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  driver         Driver              @relation(fields: [driverId], references: [id])
+  @@index([organizationId, driverId, endedAt])
+  @@index([deliveryId, assignedAt])
+}
+
+model Route {
+  id                String       @id @default(uuid()) @db.Uuid
+  organizationId    String       @db.Uuid
+  deliveryId        String       @db.Uuid
+  legType           RouteLegType
+  version           Int
+  provider          String
+  profile           String
+  status            RouteStatus  @default(PENDING)
+  origin            Json
+  destination       Json
+  waypoints         Json?
+  geometry          Json?
+  encodedPolyline   String?
+  distanceM         Int?
+  durationSeconds   Int?
+  calculationReason String
+  isActive          Boolean      @default(true)
+  calculatedAt      DateTime?
+  failureCode       String?
+  createdAt         DateTime     @default(now())
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  delivery          Delivery     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  @@unique([deliveryId, legType, version])
+  @@index([organizationId, deliveryId, isActive])
+}
+
+model DomainEvent {
+  id             String        @id @default(uuid()) @db.Uuid
+  sequence       BigInt        @unique @default(autoincrement())
+  organizationId String        @db.Uuid
+  aggregateType  AggregateType
+  aggregateId    String        @db.Uuid
+  deliveryId     String?       @db.Uuid
+  driverId       String?       @db.Uuid
+  eventType      String
+  occurredAt     DateTime      @default(now())
+  actorType      ActorType
+  actorId        String?
+  metadata       Json          @default("{}")
+  correlationId  String?       @db.Uuid
+  causationId    String?       @db.Uuid
+  idempotencyKey String?
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  delivery       Delivery?     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  driver         Driver?       @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  outbox         OutboxEvent?
+  @@unique([organizationId, id])
+  @@index([organizationId, occurredAt])
+  @@index([deliveryId, sequence])
+  @@index([driverId, sequence])
+}
+
+model OutboxEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  domainEventId  String       @unique @db.Uuid
+  status         OutboxStatus @default(PENDING)
+  attempts       Int          @default(0)
+  availableAt    DateTime     @default(now())
+  publishedAt    DateTime?
+  lastError      String?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  domainEvent    DomainEvent  @relation(fields: [domainEventId], references: [id], onDelete: Cascade)
+  @@index([status, availableAt])
+}
+
+model IdempotencyRecord {
+  id               String       @id @default(uuid()) @db.Uuid
+  organizationId   String       @db.Uuid
+  actorFingerprint String
+  key              String
+  operation        String
+  requestHash      String
+  responseStatus   Int?
+  responseBody     Json?
+  createdAt        DateTime     @default(now())
+  expiresAt        DateTime
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, actorFingerprint, key])
+  @@index([expiresAt])
+}
+
+model DriverLocationSnapshot {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  driverId       String       @db.Uuid
+  telemetryEventId String     @db.Uuid
+  latitude       Decimal      @db.Decimal(9, 6)
+  longitude      Decimal      @db.Decimal(9, 6)
+  accuracyM      Float?
+  speedMps       Float?
+  headingDegrees Float?
+  batteryPct     Float?
+  observedAt     DateTime
+  receivedAt     DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  driver         Driver       @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  @@unique([driverId, telemetryEventId])
+  @@index([organizationId, driverId, observedAt])
+}
+
+model TrackingToken {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  deliveryId     String       @db.Uuid
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  lastViewedAt   DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  delivery       Delivery     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  @@index([deliveryId, revokedAt])
+}
+
+model OperationalAlert {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  deliveryId     String?       @db.Uuid
+  driverId       String?       @db.Uuid
+  type           AlertType
+  severity       AlertSeverity
+  status         AlertStatus   @default(OPEN)
+  message        String
+  openedAt       DateTime      @default(now())
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+  cooldownUntil  DateTime?
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  delivery       Delivery?     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  driver         Driver?       @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  @@index([organizationId, status, openedAt])
+}
+
+model SimulationRun {
+  id              String             @id @default(uuid()) @db.Uuid
+  organizationId  String             @db.Uuid
+  scenario        SimulationScenario
+  scenarioVersion Int                @default(1)
+  seed            BigInt
+  driverCount     Int
+  speed           Int
+  status          SimulationStatus   @default(DRAFT)
+  logicalTimeMs   BigInt             @default(0)
+  startedAt       DateTime?
+  pausedAt        DateTime?
+  stoppedAt       DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  drivers         Driver[]
+  deliveries      Delivery[]
+  agents          SimulationAgent[]
+  @@unique([organizationId, id])
+  @@index([organizationId, status])
+}
+
+model SimulationAgent {
+  id                String         @id @default(uuid()) @db.Uuid
+  simulationRunId   String         @db.Uuid
+  driverId          String         @unique @db.Uuid
+  currentDeliveryId String?        @db.Uuid
+  phase             String
+  routePositionM    Float          @default(0)
+  randomState       BigInt
+  telemetrySequence Int            @default(0)
+  nextActionAtMs    BigInt
+  exceptionFlags    Json           @default("{}")
+  updatedAt         DateTime       @updatedAt
+  simulationRun     SimulationRun  @relation(fields: [simulationRunId], references: [id], onDelete: Cascade)
+  driver            Driver         @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  currentDelivery   Delivery?      @relation(fields: [currentDeliveryId], references: [id], onDelete: SetNull)
+  @@index([simulationRunId, nextActionAtMs])
+}

@@ -1,0 +1,38 @@
+{
+  "name": "deliveryos",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @deliveryos/web dev",
+    "dev:runtime": "pnpm --filter @deliveryos/runtime dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "test:e2e": "pnpm db:seed && playwright test",
+    "soak:100": "pnpm --filter @deliveryos/runtime soak:100",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "db:generate": "pnpm --filter @deliveryos/database generate",
+    "db:migrate": "pnpm --filter @deliveryos/database migrate:deploy",
+    "db:migrate:dev": "pnpm --filter @deliveryos/database migrate",
+    "db:seed": "pnpm --filter @deliveryos/web seed",
+    "dev:worker": "pnpm --filter @deliveryos/runtime worker",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@biomejs/biome": "^2.2.4",
+    "@playwright/test": "^1.63.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.6",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,css,md}": "biome check --write --no-errors-on-unmatched"
+  }
+}
